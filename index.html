@@ -43,6 +43,7 @@
       background: var(--current-bg);
       border: 1px solid var(--current-border);
       color: var(--current-text);
+      touch-action: none; /* Previene scroll inesperado al iniciar toque */
     }
     .placed { --current-bg: var(--fam-bg, var(--btn-bg)); --current-border: var(--fam-border, #77a6be); }
     
@@ -267,7 +268,7 @@
       },
       volumes: {
         R1: ["ASL", "ASU", "BLL", "BLU", "DGL", "DGU", "PAL", "PAU", "SAO", "SLE"],
-        R2: ["CJL", "CJU", "TER", "TLL", "TLU", "ZGZ", "ZML", "ZMM", "ZMU"]
+        R2: ["CJL", "CJU", "TLL", "TLU", "TER", "ZGZ", "ZML", "ZMM", "ZMU"] // <- TER ordenado junto a ZGZ
       },
       aggregations: {
         R1: {
@@ -617,6 +618,97 @@
       localStorage.setItem('configureitor_pos', JSON.stringify(positions));
     }
 
+    // --- LÓGICA DE EVENTOS TÁCTILES (DRAG & DROP PARA MÓVIL) ---
+    let touchData = null;
+    let touchGhost = null;
+    let currentDropTarget = null;
+
+    document.addEventListener('touchstart', e => {
+      const target = e.target.closest('.volume:not(.used), .placed');
+      if (!target) return;
+      
+      const touch = e.touches[0];
+      let volumeName = target.dataset.volume || target.dataset.placed;
+      
+      touchData = {
+        target: target,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        volume: volumeName,
+        isDragging: false,
+        offsetX: 0,
+        offsetY: 0
+      };
+    }, {passive: true});
+
+    document.addEventListener('touchmove', e => {
+      if (!touchData) return;
+      const touch = e.touches[0];
+      
+      // Calcular si el usuario ha movido el dedo lo suficiente (5px)
+      const dx = touch.clientX - touchData.startX;
+      const dy = touch.clientY - touchData.startY;
+      
+      if (!touchData.isDragging && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+        touchData.isDragging = true;
+        
+        // Crear elemento fantasma
+        touchGhost = touchData.target.cloneNode(true);
+        touchGhost.style.position = 'fixed';
+        touchGhost.style.zIndex = '9999';
+        touchGhost.style.opacity = '0.8';
+        touchGhost.style.pointerEvents = 'none';
+        touchGhost.style.margin = '0';
+        
+        const rect = touchData.target.getBoundingClientRect();
+        touchData.offsetX = touchData.startX - rect.left;
+        touchData.offsetY = touchData.startY - rect.top;
+        
+        document.body.appendChild(touchGhost);
+        touchData.target.style.opacity = '0.4';
+      }
+      
+      if (touchData.isDragging) {
+        e.preventDefault(); // Prevenir el scroll de la página solo cuando arrastramos
+        touchGhost.style.left = (touch.clientX - touchData.offsetX) + 'px';
+        touchGhost.style.top = (touch.clientY - touchData.offsetY) + 'px';
+        
+        const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+        const newTarget = elUnder ? elUnder.closest('.dropzone, .palette') : null;
+        
+        if (currentDropTarget && currentDropTarget !== newTarget) {
+          currentDropTarget.classList.remove('over');
+        }
+        if (newTarget) {
+          newTarget.classList.add('over');
+        }
+        currentDropTarget = newTarget;
+      }
+    }, {passive: false});
+
+    document.addEventListener('touchend', e => {
+      if (!touchData) return;
+      
+      if (touchData.isDragging) {
+        if (currentDropTarget) {
+          currentDropTarget.classList.remove('over');
+          if (currentDropTarget.classList.contains('dropzone')) {
+            const idx = Number(currentDropTarget.dataset.index);
+            place(touchData.volume, idx);
+          } else if (currentDropTarget.classList.contains('palette') || currentDropTarget.closest('.palette')) {
+            place(touchData.volume, -1);
+          }
+        }
+        touchGhost.remove();
+        touchGhost = null;
+        touchData.target.style.opacity = '1';
+      }
+      
+      touchData = null;
+      currentDropTarget = null;
+    });
+
+    // --- ACCIONES DE BOTONES ---
     $('#exportBtn').addEventListener('click', () => {
       const active = positions.filter(p => p.length);
       let text = 'Configureitor - ' + route + '\nEstado: ' + $('#resultCode').textContent + '\n\n';
